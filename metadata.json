@@ -1,0 +1,7 @@
+{
+  "name": "GTaskFlow",
+  "description": "Integrated Finance and Task Management system with Google Apps Script (GAS) integration.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
