@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { Wallet, ListTodo, LogOut, Settings, User as UserIcon, LayoutDashboard, Activity, Send, X, Clock, AlertCircle } from 'lucide-react';
+import { Wallet, ListTodo, LogOut, Settings, User as UserIcon, LayoutDashboard, Activity, Send, X, Clock, AlertCircle, Receipt } from 'lucide-react';
 import { User as UserType, TaskEntry } from '../types';
 import { callGAS } from '../services/api';
 import { format, parseISO } from 'date-fns';
@@ -78,6 +78,13 @@ export default function OptionScreen({ user, onLogout }: OptionScreenProps) {
       icon: Activity,
       color: 'bg-purple-500',
       path: '/analysis',
+    },
+    {
+      title: 'Bills',
+      description: 'Manage recurring bills',
+      icon: Receipt,
+      color: 'bg-rose-500',
+      path: '/bills',
     },
   ];
 

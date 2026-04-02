@@ -24,6 +24,7 @@ import {
 import { format } from 'date-fns';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import Tesseract from 'tesseract.js';
 
 import { formatCompactNumber } from '../lib/utils';
 
@@ -37,7 +38,9 @@ export default function Finance({ config, user }: FinanceProps) {
   const [showForm, setShowForm] = useState(false);
   const [editingEntry, setEditingEntry] = useState<FinanceEntry | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const ocrInputRef = useRef<HTMLInputElement>(null);
   
   const [newEntry, setNewEntry] = useState<Partial<FinanceEntry>>({
     type: 'expense',
@@ -125,6 +128,44 @@ export default function Finance({ config, user }: FinanceProps) {
       setUploading(false);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleOCRUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setScanning(true);
+    try {
+      const result = await Tesseract.recognize(file, 'ind');
+      const text = result.data.text;
+      
+      setNewEntry(prev => ({
+        ...prev,
+        description: (prev.description ? prev.description + '\n\n' : '') + '--- Hasil Scan Nota ---\n' + text
+      }));
+
+      const lines = text.split('\n');
+      let foundAmount = 0;
+      for (const line of lines) {
+        if (line.toLowerCase().includes('total') || line.toLowerCase().includes('jumlah')) {
+          const numbers = line.replace(/[^0-9]/g, '');
+          if (numbers && parseInt(numbers) > foundAmount) {
+            foundAmount = parseInt(numbers);
+          }
+        }
+      }
+      
+      if (foundAmount > 0) {
+        setNewEntry(prev => ({ ...prev, amount: foundAmount }));
+        setDisplayAmount(formatCurrency(foundAmount.toString()));
+      }
+
+    } catch (error) {
+      console.error("OCR Error:", error);
+      alert("Gagal memindai nota.");
+    } finally {
+      setScanning(false);
+    }
   };
 
   const handleAddEntry = async (e: React.FormEvent) => {
@@ -476,10 +517,32 @@ export default function Finance({ config, user }: FinanceProps) {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Description</label>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-xs font-black text-slate-400 uppercase tracking-widest">Description</label>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        ref={ocrInputRef}
+                        onChange={handleOCRUpload}
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => ocrInputRef.current?.click()}
+                        disabled={scanning}
+                        className="text-[10px] font-black text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                      >
+                        {scanning ? (
+                          <><div className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" /> SCANNING...</>
+                        ) : (
+                          <><Camera className="w-3 h-3" /> SCAN NOTA (OCR)</>
+                        )}
+                      </button>
+                    </div>
                     <textarea
                       className="w-full px-4 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-slate-900 outline-none font-bold resize-none"
-                      rows={2}
+                      rows={4}
                       placeholder="Add notes..."
                       value={newEntry.description}
                       onChange={(e) => setNewEntry({ ...newEntry, description: e.target.value })}

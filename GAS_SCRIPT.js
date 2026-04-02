@@ -1,3 +1,5 @@
+const FONNTE_TOKEN = "MASUKKAN_TOKEN_FONNTE_ANDA_DISINI";
+
 /**
  * INSTRUCTIONS:
  * 1. Open Google Apps Script (script.google.com)
@@ -17,8 +19,9 @@ function doPost(e) {
   
   // Sheets Setup
   const userSheet = getOrCreateSheet(ss, 'Users', ['Name', 'Username', 'Password', 'WaNumber', 'UserGasUrl', 'CreatedAt', 'PhoneNumber']);
-  const financeSheet = getOrCreateSheet(ss, 'Finance', ['Username', 'Date', 'Type', 'Amount', 'Category', 'Source', 'Description', 'Lat', 'Lng', 'ReceiptUrl', 'CreatedAt', 'LocationName', 'PhoneNumber']);
-  const taskSheet = getOrCreateSheet(ss, 'Tasks', ['Username', 'Title', 'Description', 'Status', 'Priority', 'Deadline', 'ImageUrl', 'ReminderSent', 'CreatedAt', 'PhoneNumber']);
+  const financeSheet = getOrCreateSheet(ss, 'Finance', ['Username', 'Date', 'Type', 'Amount', 'Category', 'Source', 'Description', 'Lat', 'Lng', 'ReceiptUrl', 'CreatedAt', 'LocationName', 'PhoneNumber', 'ID']);
+  const taskSheet = getOrCreateSheet(ss, 'Tasks', ['Username', 'Title', 'Description', 'Status', 'Priority', 'Deadline', 'ImageUrl', 'ReminderSent', 'CreatedAt', 'PhoneNumber', 'RecurrenceType', 'RecurrenceInterval', 'RecurrenceFreq', 'CurrentCount']);
+  const billSheet = getOrCreateSheet(ss, 'Bills', ['Username', 'Title', 'Amount', 'DueDate', 'LastPaidDate', 'RecurrenceType', 'CreatedAt', 'ID']);
 
   if (action === 'register') {
     const { name, username, password, phone_number } = data;
@@ -85,12 +88,13 @@ function doPost(e) {
   if (action === 'get_data') {
     const finRows = financeSheet.getDataRange().getValues();
     const tskRows = taskSheet.getDataRange().getValues();
+    const bRows = billSheet.getDataRange().getValues();
     
     const finance = [];
     for (let i = 1; i < finRows.length; i++) {
       if (finRows[i][0] === username) {
         finance.push({ 
-          id: i + 1,
+          id: finRows[i][13] || (i + 1).toString(),
           date: finRows[i][1], 
           type: finRows[i][2], 
           amount: finRows[i][3], 
@@ -116,15 +120,35 @@ function doPost(e) {
           deadline: tskRows[i][5], 
           progress_image_url: tskRows[i][6], 
           reminder_sent: tskRows[i][7],
-          phone_number: tskRows[i][9]
+          phone_number: tskRows[i][9],
+          recurrence_type: tskRows[i][10] || 'none',
+          recurrence_interval: tskRows[i][11] || 1,
+          recurrence_freq: tskRows[i][12] || 1,
+          current_count: tskRows[i][13] || 0
         });
       }
     }
     
+    const bills = [];
+    for (let i = 1; i < bRows.length; i++) {
+      if (bRows[i][0] === username) {
+        bills.push({
+          id: bRows[i][7] || (i + 1).toString(),
+          title: bRows[i][1],
+          amount: bRows[i][2],
+          due_date: bRows[i][3],
+          last_paid_date: bRows[i][4],
+          recurrence_type: bRows[i][5],
+          created_at: bRows[i][6]
+        });
+      }
+    }
+
     return response({
       success: true,
       finance,
-      tasks
+      tasks,
+      bills
     });
   }
 
@@ -164,7 +188,11 @@ function doPost(e) {
           deadline: tskData[i][5], 
           progress_image_url: tskData[i][6], 
           reminder_sent: tskData[i][7], 
-          phone_number: tskData[i][9]
+          phone_number: tskData[i][9],
+          recurrence_type: tskData[i][10] || 'none',
+          recurrence_interval: tskData[i][11] || 1,
+          recurrence_freq: tskData[i][12] || 1,
+          current_count: tskData[i][13] || 0
         });
       }
     }
@@ -172,7 +200,18 @@ function doPost(e) {
   }
 
   if (action === 'add_finance') {
-    const { date, type, amount, category, source, description, location, receiptUrl, phone_number } = data;
+    const { id, date, type, amount, category, source, description, location, receiptUrl } = data;
+    
+    // Find user's phone number
+    const users = userSheet.getDataRange().getValues();
+    let phoneNumber = '';
+    for (let i = 1; i < users.length; i++) {
+      if (users[i][1] === username) {
+        phoneNumber = users[i][6] || users[i][3] || '';
+        break;
+      }
+    }
+
     financeSheet.appendRow([
       username, 
       date, 
@@ -181,12 +220,13 @@ function doPost(e) {
       category, 
       source, 
       description, 
-      location?.lat || '', 
-      location?.lng || '', 
+      'Local', // Lat set to Local
+      'Local', // Lng set to Local
       receiptUrl || '', 
       new Date().toISOString(),
-      location?.name || '',
-      phone_number || ''
+      location?.name || 'Local', // Location name set to Local if empty
+      phoneNumber,
+      id || new Date().getTime().toString()
     ]);
     return response({ success: true });
   }
@@ -217,7 +257,7 @@ function doPost(e) {
   }
 
   if (action === 'add_task') {
-    const { title, description, status, priority, deadline, phone_number } = data;
+    const { title, description, status, priority, deadline, phone_number, recurrence_type, recurrence_interval, recurrence_freq, current_count } = data;
     taskSheet.appendRow([
       username, 
       title, 
@@ -228,13 +268,17 @@ function doPost(e) {
       '', 
       false, 
       new Date().toISOString(),
-      phone_number || ''
+      phone_number || '',
+      recurrence_type || 'none',
+      recurrence_interval || 1,
+      recurrence_freq || 1,
+      current_count || 0
     ]);
     return response({ success: true });
   }
 
   if (action === 'update_task') {
-    const { id, title, status, imageUrl, description, reminder_sent, priority, deadline } = data;
+    const { id, title, status, imageUrl, description, reminder_sent, priority, deadline, recurrence_type, recurrence_interval, recurrence_freq, current_count } = data;
     const rowIndex = parseInt(id);
     
     // If ID is provided, use it for faster lookup
@@ -246,6 +290,10 @@ function doPost(e) {
       if (deadline) taskSheet.getRange(rowIndex, 6).setValue(deadline);
       if (imageUrl) taskSheet.getRange(rowIndex, 7).setValue(imageUrl);
       if (reminder_sent !== undefined) taskSheet.getRange(rowIndex, 8).setValue(reminder_sent);
+      if (recurrence_type !== undefined) taskSheet.getRange(rowIndex, 11).setValue(recurrence_type);
+      if (recurrence_interval !== undefined) taskSheet.getRange(rowIndex, 12).setValue(recurrence_interval);
+      if (recurrence_freq !== undefined) taskSheet.getRange(rowIndex, 13).setValue(recurrence_freq);
+      if (current_count !== undefined) taskSheet.getRange(rowIndex, 14).setValue(current_count);
       return response({ success: true });
     }
 
@@ -259,6 +307,10 @@ function doPost(e) {
         if (reminder_sent !== undefined) taskSheet.getRange(i + 1, 8).setValue(reminder_sent);
         if (priority) taskSheet.getRange(i + 1, 5).setValue(priority);
         if (deadline) taskSheet.getRange(i + 1, 6).setValue(deadline);
+        if (recurrence_type !== undefined) taskSheet.getRange(i + 1, 11).setValue(recurrence_type);
+        if (recurrence_interval !== undefined) taskSheet.getRange(i + 1, 12).setValue(recurrence_interval);
+        if (recurrence_freq !== undefined) taskSheet.getRange(i + 1, 13).setValue(recurrence_freq);
+        if (current_count !== undefined) taskSheet.getRange(i + 1, 14).setValue(current_count);
         return response({ success: true });
       }
     }
@@ -281,6 +333,72 @@ function doPost(e) {
       }
     }
     return response({ success: false, message: 'Task not found' });
+  }
+
+  // --- BILLS ACTIONS ---
+  if (action === 'add_bill') {
+    const { id, title, amount, due_date, last_paid_date, recurrence_type, created_at } = data;
+    const newId = id || new Date().getTime().toString();
+    billSheet.appendRow([username, title, amount, due_date, last_paid_date || '', recurrence_type || 'monthly', created_at || new Date().toISOString(), newId]);
+    return response({ success: true, id: newId });
+  }
+
+  if (action === 'update_bill') {
+    const { id, title, amount, due_date, last_paid_date, recurrence_type } = data;
+    const rows = billSheet.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === username && (rows[i][7] == id || (i + 1).toString() == id)) {
+        if (title !== undefined) billSheet.getRange(i + 1, 2).setValue(title);
+        if (amount !== undefined) billSheet.getRange(i + 1, 3).setValue(amount);
+        if (due_date !== undefined) billSheet.getRange(i + 1, 4).setValue(due_date);
+        if (last_paid_date !== undefined) billSheet.getRange(i + 1, 5).setValue(last_paid_date);
+        if (recurrence_type !== undefined) billSheet.getRange(i + 1, 6).setValue(recurrence_type);
+        return response({ success: true });
+      }
+    }
+    return response({ success: false, message: 'Bill not found' });
+  }
+
+  if (action === 'delete_bill') {
+    const { id } = data;
+    const rows = billSheet.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === username && (rows[i][7] == id || (i + 1).toString() == id)) {
+        billSheet.deleteRow(i + 1);
+        return response({ success: true });
+      }
+    }
+    return response({ success: false, message: 'Bill not found' });
+  }
+
+  if (action === 'pay_bill') {
+    const { id, last_paid_date, next_due_date, amount, title, date } = data;
+    const rows = billSheet.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === username && (rows[i][7] == id || (i + 1).toString() == id)) {
+        billSheet.getRange(i + 1, 5).setValue(last_paid_date);
+        billSheet.getRange(i + 1, 4).setValue(next_due_date);
+        
+        // Find user's phone number
+        const users = userSheet.getDataRange().getValues();
+        let phoneNumber = '';
+        for (let j = 1; j < users.length; j++) {
+          if (users[j][1] === username) {
+            phoneNumber = users[j][6] || users[j][3] || '';
+            break;
+          }
+        }
+
+        // Add to Finance automatically
+        const financeId = new Date().getTime().toString();
+        financeSheet.appendRow([
+          username, date, 'expense', amount, 'Bills', 'Cash', `Pembayaran ${title}`, 'Local', 'Local', '', new Date().toISOString(), 'Local', phoneNumber, financeId
+        ]);
+        
+        return response({ success: true });
+      }
+    }
+    return response({ success: false, message: 'Bill not found' });
   }
 
   if (action === 'upload_image') {
@@ -315,4 +433,122 @@ function getOrCreateFolder(name) {
   const folders = DriveApp.getFoldersByName(name);
   if (folders.hasNext()) return folders.next();
   return DriveApp.createFolder(name);
+}
+
+// =====================================================================
+// FUNGSI PENGINGAT OTOMATIS WA (JALANKAN DENGAN TIME-DRIVEN TRIGGER SETIAP 10 MENIT)
+// =====================================================================
+function checkAndSendReminders() {
+  const now = new Date();
+  const timeZone = "Asia/Jakarta"; // Sesuaikan dengan zona waktu Anda (WIB)
+  const hourStr = Utilities.formatDate(now, timeZone, "HH");
+  const minuteStr = Utilities.formatDate(now, timeZone, "mm");
+  const dateStr = Utilities.formatDate(now, timeZone, "yyyy-MM-dd");
+  
+  const hour = parseInt(hourStr, 10);
+  const minute = parseInt(minuteStr, 10);
+
+  // Target waktu: 07:00, 13:25, 18:00
+  // Toleransi 15 menit karena trigger GAS mungkin tidak tepat waktu
+  let timeSlot = null;
+  if (hour === 7 && minute >= 0 && minute <= 15) timeSlot = "07:00";
+  else if (hour === 13 && minute >= 25 && minute <= 40) timeSlot = "13:25";
+  else if (hour === 18 && minute >= 0 && minute <= 15) timeSlot = "18:00";
+
+  if (!timeSlot) return; // Bukan waktu target
+
+  // Cek apakah sudah dikirim pada slot waktu ini hari ini
+  const props = PropertiesService.getScriptProperties();
+  const lastSentKey = `last_sent_${dateStr}_${timeSlot}`;
+  if (props.getProperty(lastSentKey)) return; 
+
+  props.setProperty(lastSentKey, "true");
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) return;
+  
+  const userSheet = ss.getSheetByName('Users');
+  const billSheet = ss.getSheetByName('Bills');
+  const taskSheet = ss.getSheetByName('Tasks');
+  
+  if (!userSheet) return;
+
+  const users = userSheet.getDataRange().getValues();
+  const userMap = {};
+  for (let i = 1; i < users.length; i++) {
+    userMap[users[i][1]] = users[i][3] || users[i][6]; 
+  }
+
+  // Proses Pengeluaran (Bills)
+  if (billSheet) {
+    const bills = billSheet.getDataRange().getValues();
+    for (let i = 1; i < bills.length; i++) {
+      const username = bills[i][0];
+      const title = bills[i][1];
+      const amount = bills[i][2];
+      const dueDate = bills[i][3]; 
+      const lastPaidDate = bills[i][4];
+      const recurrenceType = bills[i][5];
+      
+      const waNumber = userMap[username];
+      
+      if (waNumber) {
+        const isPaid = (lastPaidDate === dateStr && recurrenceType === 'daily') || 
+                       (lastPaidDate && recurrenceType !== 'daily' && lastPaidDate >= dueDate);
+        
+        if (!isPaid && dueDate <= dateStr) {
+          let message = `*PENGINGAT PENGELUARAN*\n\nHalo, tagihan untuk *${title}* jatuh tempo pada ${dueDate}.\n\nNominal: Rp ${amount.toLocaleString('id-ID')}\n\nMohon segera dicatat pembayarannya di aplikasi GTask Flow.`;
+          sendWhatsAppMessage(waNumber, message);
+        }
+      }
+    }
+  }
+
+  // Proses Kegiatan (Tasks)
+  if (taskSheet) {
+    const tasks = taskSheet.getDataRange().getValues();
+    for (let i = 1; i < tasks.length; i++) {
+      const username = tasks[i][0];
+      const title = tasks[i][1];
+      const status = tasks[i][3];
+      const deadline = tasks[i][5]; 
+      
+      const waNumber = userMap[username];
+      
+      if (waNumber && status !== 'done') {
+        const deadlineDateStr = deadline.substring(0, 10);
+        if (deadlineDateStr <= dateStr) {
+          let message = `*PENGINGAT KEGIATAN*\n\nHalo, kegiatan *${title}* memiliki deadline pada ${deadline.replace('T', ' ')} dan belum selesai.\n\nMohon segera diselesaikan di aplikasi GTask Flow.`;
+          sendWhatsAppMessage(waNumber, message);
+        }
+      }
+    }
+  }
+}
+
+function sendWhatsAppMessage(phone, message) {
+  if (!FONNTE_TOKEN || FONNTE_TOKEN === "MASUKKAN_TOKEN_FONNTE_ANDA_DISINI") return;
+  
+  let formattedPhone = phone.toString().replace(/\D/g, '');
+  if (formattedPhone.startsWith('0')) {
+    formattedPhone = '62' + formattedPhone.substring(1);
+  }
+  
+  const url = "https://api.fonnte.com/send";
+  const options = {
+    "method": "post",
+    "headers": {
+      "Authorization": FONNTE_TOKEN
+    },
+    "payload": {
+      "target": formattedPhone,
+      "message": message
+    }
+  };
+  
+  try {
+    UrlFetchApp.fetch(url, options);
+  } catch (e) {
+    console.error("Gagal mengirim WA: " + e.toString());
+  }
 }

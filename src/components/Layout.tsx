@@ -8,7 +8,8 @@ import {
   LogOut, 
   Menu, 
   X,
-  Settings
+  Settings,
+  Receipt
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { User } from '../types';
@@ -28,6 +29,7 @@ export default function Layout({ children, onLogout, user }: LayoutProps) {
     { path: '/', icon: Home, label: 'Main Menu', color: 'text-slate-600' },
     { path: '/dashboard', icon: BarChart3, label: 'Overview', color: 'text-indigo-600' },
     { path: '/finance', icon: Wallet, label: 'Finance', color: 'text-emerald-600' },
+    { path: '/bills', icon: Receipt, label: 'Bills', color: 'text-rose-600' },
     { path: '/tasks', icon: CheckSquare, label: 'Tasks', color: 'text-blue-600' },
     { path: '/analysis', icon: BarChart3, label: 'Analysis', color: 'text-purple-600' },
     { path: '/config', icon: Settings, label: 'Settings', color: 'text-slate-500' },

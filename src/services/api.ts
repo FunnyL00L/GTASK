@@ -1,17 +1,21 @@
-import { UserConfig, FinanceEntry, TaskEntry } from '../types';
+import { UserConfig, FinanceEntry, TaskEntry, BillEntry } from '../types';
 
 const LOCAL_STORAGE_KEY = 'gtaskflow_local_data';
 
 interface LocalData {
   finance: FinanceEntry[];
   tasks: TaskEntry[];
+  bills: BillEntry[];
   lastSync: string;
 }
 
 export const getLocalData = (): LocalData => {
   const data = localStorage.getItem(LOCAL_STORAGE_KEY);
-  if (data) return JSON.parse(data);
-  return { finance: [], tasks: [], lastSync: new Date().toISOString() };
+  if (data) {
+    const parsed = JSON.parse(data);
+    return { finance: [], tasks: [], bills: [], ...parsed };
+  }
+  return { finance: [], tasks: [], bills: [], lastSync: new Date().toISOString() };
 };
 
 export const saveLocalData = (data: Partial<LocalData>) => {
@@ -39,6 +43,7 @@ export const callGAS = async (url: string, payload: any) => {
         saveLocalData({
           finance: result.finance,
           tasks: result.tasks,
+          bills: result.bills || [],
           lastSync: new Date().toISOString()
         });
       } else if (payload.action === 'get_finance') {
@@ -61,7 +66,7 @@ const handleLocalAction = (payload: any) => {
   const action = payload.action;
 
   if (action === 'get_data') {
-    return { success: true, finance: data.finance, tasks: data.tasks, isLocal: true };
+    return { success: true, finance: data.finance, tasks: data.tasks, bills: data.bills || [], isLocal: true };
   }
 
   if (action === 'add_finance') {
@@ -101,6 +106,56 @@ const handleLocalAction = (payload: any) => {
   if (action === 'delete_task') {
     const updatedTasks = data.tasks.filter(t => t.id !== payload.id);
     saveLocalData({ tasks: updatedTasks });
+    return { success: true, isLocal: true };
+  }
+
+  if (action === 'add_bill') {
+    const newBill = { 
+      ...payload, 
+      id: Date.now().toString(), 
+      created_at: payload.created_at || new Date().toISOString(),
+      last_paid_date: payload.last_paid_date || ''
+    };
+    saveLocalData({ bills: [newBill, ...(data.bills || [])] });
+    return { success: true, isLocal: true };
+  }
+
+  if (action === 'update_bill') {
+    const updatedBills = (data.bills || []).map(b => {
+      if (b.id === payload.id) {
+        const { id, ...updates } = payload;
+        return { ...b, ...updates };
+      }
+      return b;
+    });
+    saveLocalData({ bills: updatedBills });
+    return { success: true, isLocal: true };
+  }
+
+  if (action === 'delete_bill') {
+    const updatedBills = (data.bills || []).filter(b => b.id !== payload.id);
+    saveLocalData({ bills: updatedBills });
+    return { success: true, isLocal: true };
+  }
+
+  if (action === 'pay_bill') {
+    const updatedBills = (data.bills || []).map(b => {
+      if (b.id === payload.id) {
+        return { ...b, last_paid_date: payload.last_paid_date, due_date: payload.next_due_date };
+      }
+      return b;
+    });
+    const newFinance = {
+      id: Date.now().toString(),
+      date: payload.date,
+      type: 'expense' as const,
+      amount: payload.amount,
+      category: 'Bills',
+      source_destination: 'Cash',
+      description: `Pembayaran ${payload.title}`,
+      created_at: new Date().toISOString()
+    };
+    saveLocalData({ bills: updatedBills, finance: [newFinance, ...data.finance] });
     return { success: true, isLocal: true };
   }
 

@@ -1,14 +1,16 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { FinanceEntry, TaskEntry, User, UserConfig } from '../types';
+import { FinanceEntry, TaskEntry, BillEntry, User, UserConfig } from '../types';
 import { callGAS, getLocalData, saveLocalData } from '../services/api';
 import { useNotification } from './NotificationContext';
 
 interface DataContextType {
   finance: FinanceEntry[];
   tasks: TaskEntry[];
+  bills: BillEntry[];
   loading: {
     finance: boolean;
     tasks: boolean;
+    bills: boolean;
   };
   refreshFinance: () => Promise<void>;
   refreshTasks: () => Promise<void>;
@@ -20,6 +22,10 @@ interface DataContextType {
   addFinance: (entry: Partial<FinanceEntry>) => Promise<boolean>;
   updateFinance: (entry: Partial<FinanceEntry> & { id: string, created_at: string }) => Promise<boolean>;
   deleteFinance: (id: string, created_at: string) => Promise<boolean>;
+  addBill: (bill: Partial<BillEntry>) => Promise<boolean>;
+  updateBill: (bill: Partial<BillEntry> & { id: string }) => Promise<boolean>;
+  deleteBill: (id: string) => Promise<boolean>;
+  payBill: (id: string, amount: number, title: string, currentDueDate: string, recurrence: string) => Promise<boolean>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -28,7 +34,8 @@ export function DataProvider({ children, user }: { children: React.ReactNode, us
   const localData = getLocalData();
   const [finance, setFinance] = useState<FinanceEntry[]>(localData.finance || []);
   const [tasks, setTasks] = useState<TaskEntry[]>(localData.tasks || []);
-  const [loading, setLoading] = useState({ finance: false, tasks: false });
+  const [bills, setBills] = useState<BillEntry[]>(localData.bills || []);
+  const [loading, setLoading] = useState({ finance: false, tasks: false, bills: false });
   const { showNotification } = useNotification();
 
   // Update state if local storage changes (e.g. on mount or after login)
@@ -36,6 +43,7 @@ export function DataProvider({ children, user }: { children: React.ReactNode, us
     const data = getLocalData();
     if (data.finance.length > 0) setFinance(data.finance);
     if (data.tasks.length > 0) setTasks(data.tasks);
+    if (data.bills && data.bills.length > 0) setBills(data.bills);
   }, [user]);
 
   const refreshFinance = useCallback(async () => {
@@ -68,8 +76,8 @@ export function DataProvider({ children, user }: { children: React.ReactNode, us
 
   const refreshAll = useCallback(async () => {
     if (!user) return;
-    const hasData = finance.length > 0 || tasks.length > 0;
-    if (!hasData) setLoading({ finance: true, tasks: true });
+    const hasData = finance.length > 0 || tasks.length > 0 || bills.length > 0;
+    if (!hasData) setLoading({ finance: true, tasks: true, bills: true });
     
     const result = await callGAS(user.config.gasUrl, {
       action: 'get_data',
@@ -78,10 +86,11 @@ export function DataProvider({ children, user }: { children: React.ReactNode, us
     if (result.success) {
       setFinance(result.finance);
       setTasks(result.tasks);
-      saveLocalData({ finance: result.finance, tasks: result.tasks });
+      setBills(result.bills || []);
+      saveLocalData({ finance: result.finance, tasks: result.tasks, bills: result.bills || [] });
     }
-    setLoading({ finance: false, tasks: false });
-  }, [user, finance.length, tasks.length]);
+    setLoading({ finance: false, tasks: false, bills: false });
+  }, [user, finance.length, tasks.length, bills.length]);
 
   // Optimistic Task Methods
   const addTask = async (task: Partial<TaskEntry>) => {
@@ -266,6 +275,111 @@ export function DataProvider({ children, user }: { children: React.ReactNode, us
     return true;
   };
 
+  // Optimistic Bill Methods
+  const addBill = async (bill: Partial<BillEntry>) => {
+    if (!user) return false;
+    const newId = Date.now().toString();
+    const newBill = { ...bill, id: newId, created_at: new Date().toISOString(), last_paid_date: bill.last_paid_date || '' } as BillEntry;
+    
+    const updatedBills = [newBill, ...bills];
+    setBills(updatedBills);
+    saveLocalData({ bills: updatedBills });
+
+    callGAS(user.config.gasUrl, {
+      action: 'add_bill',
+      username: user.username,
+      ...newBill
+    }).then(res => {
+      if (!res.success) showNotification('Failed to sync bill', 'error');
+    });
+    return true;
+  };
+
+  const updateBill = async (bill: Partial<BillEntry> & { id: string }) => {
+    if (!user) return false;
+    const updatedBills = bills.map(b => b.id === bill.id ? { ...b, ...bill } : b);
+    setBills(updatedBills);
+    saveLocalData({ bills: updatedBills });
+
+    callGAS(user.config.gasUrl, {
+      action: 'update_bill',
+      username: user.username,
+      ...bill
+    }).then(res => {
+      if (!res.success) showNotification('Failed to update bill', 'error');
+    });
+    return true;
+  };
+
+  const deleteBill = async (id: string) => {
+    if (!user) return false;
+    const updatedBills = bills.filter(b => b.id !== id);
+    setBills(updatedBills);
+    saveLocalData({ bills: updatedBills });
+
+    callGAS(user.config.gasUrl, {
+      action: 'delete_bill',
+      username: user.username,
+      id
+    }).then(res => {
+      if (!res.success) showNotification('Failed to delete bill', 'error');
+    });
+    return true;
+  };
+
+  const payBill = async (id: string, amount: number, title: string, currentDueDate: string, recurrence: string) => {
+    if (!user) return false;
+    const todayStr = new Date().toISOString().split('T')[0];
+    
+    // Calculate next due date
+    let nextDate = new Date(currentDueDate);
+    if (recurrence === 'daily') nextDate.setDate(nextDate.getDate() + 1);
+    else if (recurrence === 'weekly') nextDate.setDate(nextDate.getDate() + 7);
+    else if (recurrence === 'monthly') nextDate.setMonth(nextDate.getMonth() + 1);
+    else if (recurrence === 'yearly') nextDate.setFullYear(nextDate.getFullYear() + 1);
+    
+    const nextDueDateStr = recurrence !== 'none' ? nextDate.toISOString().split('T')[0] : currentDueDate;
+
+    // Update local bill
+    const updatedBills = bills.map(b => b.id === id ? { ...b, last_paid_date: todayStr, due_date: nextDueDateStr } : b);
+    setBills(updatedBills);
+    
+    // Add local finance
+    const newFinance = {
+      id: Date.now().toString(),
+      date: new Date().toISOString(),
+      type: 'expense' as const,
+      amount,
+      category: 'Bills',
+      source_destination: 'Cash',
+      description: `Pembayaran ${title}`,
+      created_at: new Date().toISOString()
+    };
+    const updatedFinance = [newFinance, ...finance];
+    setFinance(updatedFinance);
+    
+    saveLocalData({ bills: updatedBills, finance: updatedFinance });
+
+    callGAS(user.config.gasUrl, {
+      action: 'pay_bill',
+      username: user.username,
+      id,
+      last_paid_date: todayStr,
+      next_due_date: nextDueDateStr,
+      amount,
+      title,
+      date: new Date().toISOString()
+    }).then(res => {
+      if (res.success) {
+        showNotification('Bill paid and recorded to Finance', 'success');
+      } else {
+        showNotification('Failed to sync bill payment', 'error');
+      }
+    });
+
+    return true;
+  };
+
   useEffect(() => {
     if (user) {
       refreshAll();
@@ -274,9 +388,10 @@ export function DataProvider({ children, user }: { children: React.ReactNode, us
 
   return (
     <DataContext.Provider value={{ 
-      finance, tasks, loading, refreshFinance, refreshTasks, refreshAll,
+      finance, tasks, bills, loading, refreshFinance, refreshTasks, refreshAll,
       addTask, updateTask, deleteTask,
-      addFinance, updateFinance, deleteFinance
+      addFinance, updateFinance, deleteFinance,
+      addBill, updateBill, deleteBill, payBill
     }}>
       {children}
     </DataContext.Provider>

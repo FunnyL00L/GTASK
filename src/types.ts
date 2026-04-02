@@ -41,6 +41,18 @@ export interface TaskEntry {
   created_at: string;
   completed_at?: string;
   reminder_sent: boolean;
+  recurrence_type?: 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+  recurrence_interval?: number;
+}
+
+export interface BillEntry {
+  id: string;
+  title: string;
+  amount: number;
+  due_date: string;
+  last_paid_date: string;
+  recurrence_type: 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+  created_at: string;
 }
 
 export interface AuthState {

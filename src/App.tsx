@@ -7,6 +7,7 @@ import ConfigPage from './pages/Config';
 import Dashboard from './pages/Dashboard';
 import Finance from './pages/Finance';
 import Tasks from './pages/Tasks';
+import Bills from './pages/Bills';
 import Analysis from './pages/Analysis';
 import OptionScreen from './pages/OptionScreen';
 import Layout from './components/Layout';
@@ -99,6 +100,14 @@ export default function App() {
               element={
                 auth.isLoggedIn ? (
                   <Layout onLogout={handleLogout} user={auth.user!}><Tasks config={auth.user!.config} user={auth.user!} /></Layout>
+                ) : <Navigate to="/login" />
+              } 
+            />
+            <Route 
+              path="/bills" 
+              element={
+                auth.isLoggedIn ? (
+                  <Layout onLogout={handleLogout} user={auth.user!}><Bills /></Layout>
                 ) : <Navigate to="/login" />
               } 
             />

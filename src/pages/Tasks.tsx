@@ -47,6 +47,8 @@ export default function Tasks({ config, user }: TasksProps) {
     status: 'todo',
     priority: 'medium',
     deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+    recurrence_type: 'none',
+    recurrence_interval: 1
   });
 
   const [submitting, setSubmitting] = useState(false);
@@ -92,6 +94,8 @@ export default function Tasks({ config, user }: TasksProps) {
         status: 'todo',
         priority: 'medium',
         deadline: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
+        recurrence_type: 'none',
+        recurrence_interval: 1
       });
       setShowForm(false);
       setEditingTask(null);
@@ -120,6 +124,8 @@ export default function Tasks({ config, user }: TasksProps) {
       status: task.status,
       priority: task.priority,
       deadline: format(parseISO(task.deadline), "yyyy-MM-dd'T'HH:mm"),
+      recurrence_type: task.recurrence_type || 'none',
+      recurrence_interval: task.recurrence_interval || 1
     });
     setShowForm(true);
   };
@@ -127,6 +133,41 @@ export default function Tasks({ config, user }: TasksProps) {
   const updateStatus = async (id: string, status: TaskEntry['status']) => {
     const task = tasks.find(t => t.id === id);
     if (!task) return;
+
+    // Handle recurrence logic if marking as done
+    if (status === 'done' && task.recurrence_type && task.recurrence_type !== 'none') {
+      // Fully done for this cycle, advance deadline
+      let nextDate = new Date(task.deadline);
+      const interval = task.recurrence_interval || 1;
+      
+      if (task.recurrence_type === 'daily') nextDate.setDate(nextDate.getDate() + interval);
+      else if (task.recurrence_type === 'weekly') nextDate.setDate(nextDate.getDate() + (7 * interval));
+      else if (task.recurrence_type === 'monthly') nextDate.setMonth(nextDate.getMonth() + interval);
+      else if (task.recurrence_type === 'yearly') nextDate.setFullYear(nextDate.getFullYear() + interval);
+
+      // Create the next instance
+      await addTask({
+        title: task.title,
+        description: task.description,
+        status: 'todo',
+        priority: task.priority,
+        deadline: format(nextDate, "yyyy-MM-dd'T'HH:mm"),
+        phone_number: task.phone_number,
+        recurrence_type: task.recurrence_type,
+        recurrence_interval: task.recurrence_interval
+      });
+
+      // Mark current instance as done and remove recurrence so it stays as a completed record
+      await updateTask({
+        id,
+        created_at: task.created_at,
+        status: 'done',
+        completed_at: new Date().toISOString(),
+        recurrence_type: 'none'
+      });
+      return;
+    }
+
     const updates: Partial<TaskEntry> = { status };
     if (status === 'done') {
       updates.completed_at = new Date().toISOString();
@@ -348,7 +389,7 @@ export default function Tasks({ config, user }: TasksProps) {
                         {task.status === 'done' ? <CheckCircle2 className="w-6 h-6" /> : <Clock className="w-6 h-6" />}
                       </div>
                       <div>
-                        <h3 className="font-black text-slate-900">{task.title}</h3>
+                        <h3 className={`font-black ${task.status === 'done' ? 'text-slate-400 line-through' : 'text-slate-900'}`}>{task.title}</h3>
                         <div className="flex flex-col gap-1 mt-1">
                           <div className="flex items-center gap-2">
                             <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${getPriorityColor(task.priority)}`}>
@@ -370,6 +411,12 @@ export default function Tasks({ config, user }: TasksProps) {
                             </div>
                           )}
                           
+                          {task.recurrence_type && task.recurrence_type !== 'none' && (
+                            <div className="text-[10px] font-bold text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-lg w-fit">
+                              Berulang: {task.recurrence_type}
+                            </div>
+                          )}
+
                           {task.status === 'done' && task.completed_at && (
                             <div className="text-[10px] font-bold">
                               {(() => {
@@ -578,6 +625,49 @@ export default function Tasks({ config, user }: TasksProps) {
                         onChange={(e) => setNewTask({ ...newTask, deadline: e.target.value })}
                       />
                     </div>
+                  </div>
+
+                  <div className="p-4 bg-slate-50 rounded-2xl space-y-4">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={newTask.recurrence_type !== 'none'}
+                        onChange={e => setNewTask({...newTask, recurrence_type: e.target.checked ? 'daily' : 'none'})}
+                        className="w-4 h-4 rounded text-slate-900 focus:ring-slate-900"
+                      />
+                      <span className="text-sm font-bold text-slate-700">Jadikan Kegiatan Berulang</span>
+                    </label>
+
+                    {newTask.recurrence_type && newTask.recurrence_type !== 'none' && (
+                      <div className="space-y-4 pt-2 border-t border-slate-200">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 mb-2">TIPE PENGULANGAN</label>
+                          <select
+                            value={newTask.recurrence_type}
+                            onChange={e => setNewTask({...newTask, recurrence_type: e.target.value as any})}
+                            className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium focus:ring-2 focus:ring-slate-900"
+                          >
+                            <option value="daily">Harian</option>
+                            <option value="weekly">Mingguan</option>
+                            <option value="monthly">Bulanan</option>
+                            <option value="yearly">Tahunan</option>
+                          </select>
+                        </div>
+
+                        <div className="flex gap-4">
+                          <div className="flex-1">
+                            <label className="block text-xs font-bold text-slate-500 mb-2">SETIAP ... HARI/MINGGU</label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={newTask.recurrence_interval}
+                              onChange={e => setNewTask({...newTask, recurrence_interval: Number(e.target.value)})}
+                              className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium focus:ring-2 focus:ring-slate-900"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
