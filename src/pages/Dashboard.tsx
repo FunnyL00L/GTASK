@@ -108,8 +108,8 @@ export default function Dashboard({ config, user }: DashboardProps) {
           <div className="px-6 pb-6 space-y-4">
             {finEntries.length === 0 ? (
               <p className="text-center py-4 text-slate-400 text-sm">No recent transactions</p>
-            ) : finEntries.map(entry => (
-              <div key={entry.id} className="flex items-center justify-between group">
+            ) : finEntries.map((entry, index) => (
+              <div key={`${entry.id}-${index}`} className="flex items-center justify-between group">
                 <div className="flex items-center gap-4">
                   <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${entry.type === 'income' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
                     {entry.type === 'income' ? <TrendingUp className="w-6 h-6" /> : <TrendingDown className="w-6 h-6" />}
@@ -138,10 +138,10 @@ export default function Dashboard({ config, user }: DashboardProps) {
           <div className="px-6 pb-6 space-y-4">
             {recentTasks.length === 0 ? (
               <p className="text-center py-4 text-slate-400 text-sm">No upcoming tasks</p>
-            ) : recentTasks.map(task => {
+            ) : recentTasks.map((task, index) => {
               const isOverdue = isAfter(new Date(), parseISO(task.deadline)) && task.status !== 'done';
               return (
-                <div key={task.id} className="flex items-center justify-between group">
+                <div key={`${task.id}-${index}`} className="flex items-center justify-between group">
                   <div className="flex items-center gap-4">
                     <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${isOverdue ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-600'}`}>
                       <Clock className="w-6 h-6" />

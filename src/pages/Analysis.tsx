@@ -27,7 +27,7 @@ import {
   Printer
 } from 'lucide-react';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 import html2canvas from 'html2canvas';
 
 interface AnalysisProps {
@@ -82,7 +82,7 @@ export default function Analysis({ config, user }: AnalysisProps) {
       const totalExpense = financeData.filter(e => e.type === 'expense').reduce((a, b) => a + b.amount, 0);
       const balance = totalIncome - totalExpense;
 
-      (doc as any).autoTable({
+      autoTable(doc, {
         startY: 50,
         head: [['Metric', 'Amount']],
         body: [
@@ -122,7 +122,7 @@ export default function Analysis({ config, user }: AnalysisProps) {
         e.amount.toLocaleString('id-ID')
       ]);
 
-      (doc as any).autoTable({
+      autoTable(doc, {
         startY: 25,
         head: [['Date', 'Type', 'Category', 'From/To', 'Amount']],
         body: recentFin,

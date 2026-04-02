@@ -69,7 +69,7 @@ const handleLocalAction = (payload: any) => {
       ...payload, 
       id: Date.now().toString(),
       date: payload.date || new Date().toISOString(),
-      created_at: new Date().toISOString()
+      created_at: payload.created_at || new Date().toISOString()
     };
     saveLocalData({ finance: [newEntry, ...data.finance] });
     return { success: true, isLocal: true };
@@ -79,7 +79,7 @@ const handleLocalAction = (payload: any) => {
     const newTask = { 
       ...payload, 
       id: Date.now().toString(), 
-      created_at: new Date().toISOString(),
+      created_at: payload.created_at || new Date().toISOString(),
       reminder_sent: false 
     };
     saveLocalData({ tasks: [newTask, ...data.tasks] });
@@ -87,10 +87,38 @@ const handleLocalAction = (payload: any) => {
   }
 
   if (action === 'update_task') {
-    const updatedTasks = data.tasks.map(t => 
-      t.title === payload.title ? { ...t, status: payload.status || t.status, progress_image_url: payload.imageUrl || t.progress_image_url } : t
-    );
+    const updatedTasks = data.tasks.map(t => {
+      if (t.id === payload.id) {
+        const { id, ...updates } = payload;
+        return { ...t, ...updates };
+      }
+      return t;
+    });
     saveLocalData({ tasks: updatedTasks });
+    return { success: true, isLocal: true };
+  }
+
+  if (action === 'delete_task') {
+    const updatedTasks = data.tasks.filter(t => t.id !== payload.id);
+    saveLocalData({ tasks: updatedTasks });
+    return { success: true, isLocal: true };
+  }
+
+  if (action === 'update_finance') {
+    const updatedFinance = data.finance.map(f => {
+      if (f.id === payload.id) {
+        const { id, ...updates } = payload;
+        return { ...f, ...updates };
+      }
+      return f;
+    });
+    saveLocalData({ finance: updatedFinance });
+    return { success: true, isLocal: true };
+  }
+
+  if (action === 'delete_finance') {
+    const updatedFinance = data.finance.filter(f => f.id !== payload.id);
+    saveLocalData({ finance: updatedFinance });
     return { success: true, isLocal: true };
   }
 

@@ -145,8 +145,8 @@ export default function OptionScreen({ user, onLogout }: OptionScreenProps) {
                 {pendingTasks.length === 0 ? (
                   <p className="text-center text-slate-400 font-bold py-8">No pending tasks!</p>
                 ) : (
-                  pendingTasks.map((t) => (
-                    <div key={t.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                  pendingTasks.map((t, index) => (
+                    <div key={`${t.id}-${index}`} className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                       <div className="flex items-center justify-between mb-1">
                         <h4 className="font-black text-slate-900">{t.title}</h4>
                         <span className="text-[10px] font-black px-2 py-0.5 bg-white rounded-lg border border-slate-200 uppercase">{t.priority}</span>

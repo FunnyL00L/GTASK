@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import jsPDF from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 
 import { formatCompactNumber } from '../lib/utils';
 
@@ -33,7 +33,7 @@ interface FinanceProps {
 }
 
 export default function Finance({ config, user }: FinanceProps) {
-  const { finance: entries, loading, refreshFinance } = useData();
+  const { finance: entries, loading, addFinance, updateFinance, deleteFinance } = useData();
   const [showForm, setShowForm] = useState(false);
   const [editingEntry, setEditingEntry] = useState<FinanceEntry | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -76,19 +76,16 @@ export default function Finance({ config, user }: FinanceProps) {
     setShowForm(true);
   };
 
-  const deleteEntry = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this transaction?')) return;
-    
-    const result = await callGAS(config.gasUrl, {
-      action: 'delete_finance',
-      username: user.username,
-      id
-    });
+  const [itemToDelete, setItemToDelete] = useState<{id: string, created_at: string} | null>(null);
 
-    if (result.success) {
-      refreshFinance();
-    } else {
-      alert('Failed to delete');
+  const confirmDelete = (id: string, created_at: string) => {
+    setItemToDelete({ id, created_at });
+  };
+
+  const executeDelete = async () => {
+    if (itemToDelete) {
+      await deleteFinance(itemToDelete.id, itemToDelete.created_at);
+      setItemToDelete(null);
     }
   };
 
@@ -159,25 +156,22 @@ export default function Finance({ config, user }: FinanceProps) {
       console.log('Location access denied or timeout');
     }
 
-    const action = editingEntry ? 'update_finance' : 'add_finance';
-    const payload = {
-      action,
-      username: user.username,
-      id: editingEntry?.id,
-      ...newEntry,
-      source: newEntry.source_destination, // Explicitly map to 'source' for GAS
-      phone_number: user.phone_number,
-      receiptUrl: newEntry.receipt_url,
-      location
-    };
+    let success = false;
+    if (editingEntry) {
+      success = await updateFinance({
+        id: editingEntry.id,
+        created_at: editingEntry.created_at,
+        ...newEntry,
+        location: location || editingEntry.location
+      });
+    } else {
+      success = await addFinance({
+        ...newEntry,
+        location
+      });
+    }
 
-    // Optimistic Update can be implemented in DataContext if needed
-    setShowForm(false);
-    setEditingEntry(null);
-
-    const result = await callGAS(config.gasUrl, payload);
-
-    if (result.success) {
+    if (success) {
       setNewEntry({
         type: 'expense',
         amount: 0,
@@ -188,9 +182,8 @@ export default function Finance({ config, user }: FinanceProps) {
         receipt_url: '',
       });
       setDisplayAmount('0');
-      refreshFinance();
-    } else {
-      alert('Failed: ' + result.message);
+      setShowForm(false);
+      setEditingEntry(null);
     }
     setSubmitting(false);
   };
@@ -208,7 +201,7 @@ export default function Finance({ config, user }: FinanceProps) {
       e.description
     ]);
 
-    (doc as any).autoTable({
+    autoTable(doc, {
       head: [['Date', 'Type', 'Category', 'From/To', 'Amount', 'Description']],
       body: tableData,
       startY: 20,
@@ -318,10 +311,10 @@ export default function Finance({ config, user }: FinanceProps) {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3">
-            {filteredEntries.map((entry) => (
+            {filteredEntries.map((entry, index) => (
               <motion.div 
                 layout
-                key={entry.id}
+                key={`${entry.id}-${index}`}
                 onClick={() => setSelectedEntry(entry)}
                 className="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm flex items-center justify-between group hover:border-slate-200 transition-all cursor-pointer"
               >
@@ -343,7 +336,7 @@ export default function Finance({ config, user }: FinanceProps) {
                     <button onClick={(e) => { e.stopPropagation(); startEdit(entry); }} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all">
                       <Edit2 className="w-4 h-4" />
                     </button>
-                    <button onClick={(e) => { e.stopPropagation(); deleteEntry(entry.id); }} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all">
+                    <button onClick={(e) => { e.stopPropagation(); confirmDelete(entry.id, entry.created_at); }} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all">
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
@@ -598,6 +591,39 @@ export default function Finance({ config, user }: FinanceProps) {
                     </button>
                   </div>
                 )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {itemToDelete && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[32px] w-full max-w-sm p-6 shadow-2xl text-center"
+            >
+              <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-8 h-8" />
+              </div>
+              <h3 className="text-xl font-black text-slate-900 mb-2">Delete Transaction?</h3>
+              <p className="text-slate-500 text-sm mb-6">This action cannot be undone. Are you sure you want to remove this record?</p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setItemToDelete(null)}
+                  className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={executeDelete}
+                  className="flex-1 py-3 bg-rose-600 text-white rounded-2xl font-bold hover:bg-rose-700 transition-all shadow-lg shadow-rose-200"
+                >
+                  Delete
+                </button>
               </div>
             </motion.div>
           </div>

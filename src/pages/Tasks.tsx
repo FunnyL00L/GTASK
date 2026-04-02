@@ -24,7 +24,7 @@ import {
   Edit2,
   Trash2
 } from 'lucide-react';
-import { format, isAfter, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths } from 'date-fns';
+import { format, isAfter, parseISO, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths, differenceInDays } from 'date-fns';
 
 interface TasksProps {
   config: UserConfig;
@@ -32,10 +32,10 @@ interface TasksProps {
 }
 
 export default function Tasks({ config, user }: TasksProps) {
-  const { tasks, loading, refreshTasks } = useData();
+  const { tasks, loading, addTask, updateTask, deleteTask } = useData();
   const [showForm, setShowForm] = useState(false);
   const [editingTask, setEditingTask] = useState<TaskEntry | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [uploading, setUploading] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list');
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [filterPriority, setFilterPriority] = useState<'all' | 'high' | 'medium' | 'low'>('all');
@@ -74,18 +74,18 @@ export default function Tasks({ config, user }: TasksProps) {
     e.preventDefault();
     setSubmitting(true);
 
-    const action = editingTask ? 'update_task' : 'add_task';
-    const payload = {
-      action,
-      username: user.username,
-      phone_number: user.phone_number,
-      id: editingTask?.id,
-      ...newTask
-    };
+    let success = false;
+    if (editingTask) {
+      success = await updateTask({
+        id: editingTask.id,
+        created_at: editingTask.created_at,
+        ...newTask
+      });
+    } else {
+      success = await addTask(newTask);
+    }
 
-    const result = await callGAS(config.gasUrl, payload);
-
-    if (result.success) {
+    if (success) {
       setNewTask({
         title: '',
         description: '',
@@ -95,27 +95,20 @@ export default function Tasks({ config, user }: TasksProps) {
       });
       setShowForm(false);
       setEditingTask(null);
-      refreshTasks();
-    } else {
-      alert('Failed: ' + result.message);
     }
     setSubmitting(false);
   };
 
-  const deleteTask = async (id: string, title: string) => {
-    if (!confirm('Are you sure you want to delete this task?')) return;
-    
-    const result = await callGAS(config.gasUrl, {
-      action: 'delete_task',
-      username: user.username,
-      id,
-      title
-    });
+  const [taskToDelete, setTaskToDelete] = useState<{id: string, title: string, created_at: string} | null>(null);
 
-    if (result.success) {
-      refreshTasks();
-    } else {
-      alert('Failed to delete');
+  const confirmDelete = (id: string, title: string, created_at: string) => {
+    setTaskToDelete({ id, title, created_at });
+  };
+
+  const executeDelete = async () => {
+    if (taskToDelete) {
+      await deleteTask(taskToDelete.id, taskToDelete.title, taskToDelete.created_at);
+      setTaskToDelete(null);
     }
   };
 
@@ -134,19 +127,13 @@ export default function Tasks({ config, user }: TasksProps) {
   const updateStatus = async (id: string, status: TaskEntry['status']) => {
     const task = tasks.find(t => t.id === id);
     if (!task) return;
-
-    const result = await callGAS(config.gasUrl, {
-      action: 'update_task',
-      username: user.username,
-      title: task.title,
-      status
-    });
-    
-    if (result.success) {
-      refreshTasks();
-    } else {
-      alert('Failed to update status');
+    const updates: Partial<TaskEntry> = { status };
+    if (status === 'done') {
+      updates.completed_at = new Date().toISOString();
+    } else if (status === 'in_progress') {
+      updates.completed_at = '';
     }
+    await updateTask({ id, created_at: task.created_at, ...updates });
   };
 
   const toggleChecklistItem = async (task: TaskEntry, index: number) => {
@@ -162,43 +149,33 @@ export default function Tasks({ config, user }: TasksProps) {
     }
 
     const newDescription = lines.join('\n');
-    
-    const result = await callGAS(config.gasUrl, {
-      action: 'update_task',
-      username: user.username,
-      title: task.title,
-      description: newDescription
-    });
-
-    if (result.success) {
-      refreshTasks();
-    }
+    await updateTask({ id: task.id, created_at: task.created_at, description: newDescription });
   };
 
   const handleImageUpload = async (id: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const task = tasks.find(t => t.id === id);
     if (!task || !e.target.files?.[0]) return;
 
-    setUploading(true);
+    setUploading(id);
     const reader = new FileReader();
-    reader.onloadend = async () => {
+    reader.onload = async () => {
       const base64 = (reader.result as string).split(',')[1];
       const uploadRes = await callGAS(config.gasUrl, {
         action: 'upload_image',
+        username: user.username,
         image: base64,
       });
 
       if (uploadRes.success) {
-        await callGAS(config.gasUrl, {
-          action: 'update_task',
-          username: user.username,
-          title: task.title,
+        await updateTask({
+          id: task.id,
+          created_at: task.created_at,
           status: 'done',
-          imageUrl: uploadRes.url
+          completed_at: new Date().toISOString(),
+          progress_image_url: uploadRes.url
         });
-        refreshTasks();
       }
-      setUploading(false);
+      setUploading(null);
     };
     reader.readAsDataURL(e.target.files[0]);
   };
@@ -218,13 +195,11 @@ export default function Tasks({ config, user }: TasksProps) {
     const waUrl = `https://wa.me/${config.waNumber}?text=${encodeURIComponent(message)}`;
     window.open(waUrl, '_blank');
 
-    await callGAS(config.gasUrl, {
-      action: 'update_task',
-      username: user.username,
-      title: task.title,
+    await updateTask({
+      id: task.id,
+      created_at: task.created_at,
       reminder_sent: true
     });
-    refreshTasks();
   };
 
   const getPriorityColor = (priority: string) => {
@@ -324,8 +299,8 @@ export default function Tasks({ config, user }: TasksProps) {
             </div>
           </div>
           <div className="grid grid-cols-7 gap-2">
-            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map(d => (
-              <div key={d} className="text-center text-[10px] font-black text-slate-300 uppercase py-2">{d}</div>
+            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+              <div key={`${d}-${i}`} className="text-center text-[10px] font-black text-slate-300 uppercase py-2">{d}</div>
             ))}
             {calendarDays.map(day => {
               const dayTasks = filteredTasks.filter(t => isSameDay(parseISO(t.deadline), day));
@@ -357,14 +332,14 @@ export default function Tasks({ config, user }: TasksProps) {
               No tasks found.
             </div>
           ) : (
-            filteredTasks.map((task) => {
+            filteredTasks.map((task, index) => {
               const isOverdue = isAfter(new Date(), parseISO(task.deadline)) && task.status !== 'done';
               const descriptionLines = task.description.split('\n');
               
               return (
                 <motion.div 
                   layout
-                  key={task.id}
+                  key={`${task.id}-${index}`}
                   className="bg-white p-5 rounded-[32px] border border-slate-100 shadow-sm group hover:border-slate-200 transition-all"
                 >
                   <div className="flex items-start justify-between mb-4">
@@ -374,13 +349,37 @@ export default function Tasks({ config, user }: TasksProps) {
                       </div>
                       <div>
                         <h3 className="font-black text-slate-900">{task.title}</h3>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${getPriorityColor(task.priority)}`}>
-                            {task.priority.toUpperCase()}
-                          </span>
-                          <span className={`text-[10px] font-bold ${isOverdue ? 'text-rose-500' : 'text-slate-400'}`}>
-                            {format(parseISO(task.deadline), 'dd MMM, HH:mm')}
-                          </span>
+                        <div className="flex flex-col gap-1 mt-1">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${getPriorityColor(task.priority)}`}>
+                              {task.priority.toUpperCase()}
+                            </span>
+                            <span className={`text-[10px] font-bold ${isOverdue ? 'text-rose-500' : 'text-slate-400'}`}>
+                              {format(parseISO(task.deadline), 'dd MMM, HH:mm')}
+                            </span>
+                          </div>
+                          
+                          {task.status !== 'done' && (
+                            <div className="text-[10px] font-bold text-slate-400">
+                              {(() => {
+                                const daysLeft = differenceInDays(parseISO(task.deadline), new Date());
+                                if (daysLeft > 0) return `${daysLeft} days left`;
+                                if (daysLeft < 0) return <span className="text-rose-500">Overdue by {Math.abs(daysLeft)} days</span>;
+                                return <span className="text-amber-500">Due today</span>;
+                              })()}
+                            </div>
+                          )}
+                          
+                          {task.status === 'done' && task.completed_at && (
+                            <div className="text-[10px] font-bold">
+                              {(() => {
+                                const diff = differenceInDays(parseISO(task.deadline), parseISO(task.completed_at));
+                                if (diff > 0) return <span className="text-emerald-500">Completed {diff} days early 🚀</span>;
+                                if (diff < 0) return <span className="text-rose-500">Completed {Math.abs(diff)} days late 🐌</span>;
+                                return <span className="text-blue-500">Completed on time 🎯</span>;
+                              })()}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -388,7 +387,7 @@ export default function Tasks({ config, user }: TasksProps) {
                       <button onClick={() => startEdit(task)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all">
                         <Edit2 className="w-5 h-5" />
                       </button>
-                      <button onClick={() => deleteTask(task.id, task.title)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all">
+                      <button onClick={() => confirmDelete(task.id, task.title, task.created_at)} className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all">
                         <Trash2 className="w-5 h-5" />
                       </button>
                       <button onClick={() => sendReminder(task)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-xl transition-all">
@@ -437,10 +436,37 @@ export default function Tasks({ config, user }: TasksProps) {
                         >
                           IN PROGRESS
                         </button>
-                        <label className="flex-1 py-3 rounded-2xl text-xs font-black bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-all text-center cursor-pointer">
-                          <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(task.id, e)} />
-                          {uploading ? 'UPLOADING...' : 'FINISH'}
-                        </label>
+                        
+                        {task.priority === 'low' && (
+                          <button 
+                            onClick={() => updateStatus(task.id, 'done')}
+                            className="flex-1 py-3 rounded-2xl text-xs font-black bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-all"
+                          >
+                            FINISH
+                          </button>
+                        )}
+
+                        {task.priority === 'medium' && (
+                          <div className="flex-1 flex gap-1">
+                            <button 
+                              onClick={() => updateStatus(task.id, 'done')}
+                              className="flex-1 py-3 rounded-2xl text-[10px] font-black bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-all"
+                            >
+                              FINISH
+                            </button>
+                            <label className="flex-1 py-3 rounded-2xl text-[10px] font-black bg-blue-50 text-blue-600 hover:bg-blue-100 transition-all text-center cursor-pointer flex items-center justify-center">
+                              <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(task.id, e)} />
+                              {uploading === task.id ? '...' : '+ PROOF'}
+                            </label>
+                          </div>
+                        )}
+
+                        {task.priority === 'high' && (
+                          <label className="flex-1 py-3 rounded-2xl text-xs font-black bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-all text-center cursor-pointer">
+                            <input type="file" className="hidden" accept="image/*" onChange={(e) => handleImageUpload(task.id, e)} />
+                            {uploading === task.id ? 'UPLOADING...' : 'UPLOAD PROOF TO FINISH'}
+                          </label>
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -565,6 +591,39 @@ export default function Tasks({ config, user }: TasksProps) {
                   ) : (editingTask ? 'UPDATE TASK' : 'CREATE TASK')}
                 </button>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {taskToDelete && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[32px] w-full max-w-sm p-6 shadow-2xl text-center"
+            >
+              <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-8 h-8" />
+              </div>
+              <h3 className="text-xl font-black text-slate-900 mb-2">Delete Task?</h3>
+              <p className="text-slate-500 text-sm mb-6">Are you sure you want to delete "{taskToDelete.title}"? This cannot be undone.</p>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setTaskToDelete(null)}
+                  className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-2xl font-bold hover:bg-slate-200 transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={executeDelete}
+                  className="flex-1 py-3 bg-rose-600 text-white rounded-2xl font-bold hover:bg-rose-700 transition-all shadow-lg shadow-rose-200"
+                >
+                  Delete
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

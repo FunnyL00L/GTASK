@@ -39,6 +39,7 @@ export interface TaskEntry {
   phone_number?: string;
   progress_image_url?: string;
   created_at: string;
+  completed_at?: string;
   reminder_sent: boolean;
 }
 
